@@ -11,6 +11,9 @@ self.onmessage = async (e) => {
   
   if (msg.type === 'init') {
     try {
+      const threads = msg.threads || 4;
+      const hashSize = msg.hash || 512;
+      
       self.postMessage({type: 'log', message: '下载NNUE...'});
       const resp = await fetch('pikafish.data');
       const nnue = await resp.arrayBuffer();
@@ -21,7 +24,6 @@ self.onmessage = async (e) => {
       engine = await Pikafish({
         nnueBuffer: nnue,
         onReceiveStdout: (line) => {
-          // 捕获readyok信号
           if (line.trim() === 'readyok' && readyResolve) {
             const r = readyResolve;
             readyResolve = null;
@@ -42,18 +44,17 @@ self.onmessage = async (e) => {
         },
       });
       
-      self.postMessage({type: 'log', message: '引擎初始化完成，等待readyok...'});
+      self.postMessage({type: 'log', message: '引擎初始化完成，配置' + threads + '线程/' + hashSize + 'MB...'});
       engine.sendCommand('uci');
-      engine.sendCommand('setoption name Threads value 4');
-      engine.sendCommand('setoption name Hash value 512');
+      engine.sendCommand('setoption name Threads value ' + threads);
+      engine.sendCommand('setoption name Hash value ' + hashSize);
       engine.sendCommand('isready');
       
-      // 等待readyok，超时5秒
       await new Promise((resolve) => {
         readyResolve = resolve;
         setTimeout(() => {
           if (readyResolve) { readyResolve = null; resolve(); }
-        }, 5000);
+        }, 10000);
       });
       
       self.postMessage({type: 'ready'});

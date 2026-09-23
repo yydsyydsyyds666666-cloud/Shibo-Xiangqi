@@ -1714,7 +1714,12 @@ function fromUCI(uci) {
         console.error('Pikafish error:', msg.message);
       }
     };
-    pikafishWorker.postMessage({ type: 'init' });
+    // 检测手机还是电脑
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
+    const ENG_THREADS = isMobile ? 4 : 8;
+    const ENG_HASH = isMobile ? 512 : 1024;
+    const ENG_MOVETIME = isMobile ? 10000 : 15000;
+    pikafishWorker.postMessage({ type: 'init', threads: ENG_THREADS, hash: ENG_HASH });
   } catch (e) {
     console.error('Failed to init Pikafish:', e);
   }
@@ -1731,7 +1736,7 @@ function pikafishSearch() {
     const posCmd = 'position startpos' + (uciMoveList.length > 0 ? ' moves ' + uciMoveList.join(' ') : '');
     pikafishSend('stop');
     pikafishSend(posCmd);
-    pikafishSend('go movetime 10000');
+    pikafishSend('go movetime ' + ENG_MOVETIME);
   });
 }
 
@@ -1748,7 +1753,7 @@ async function searchBestMove(board) {
   }
   // 超时保护：25秒没响应就算失败
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('engine timeout')), 25000)
+    setTimeout(() => reject(new Error('engine timeout')), 30000)
   );
   try {
     const result = await Promise.race([pikafishSearch(), timeoutPromise]);
@@ -1764,11 +1769,9 @@ async function searchBestMove(board) {
 }
 
 function reEvaluatePosition(){
-  // 悔棋后重新评估当前局面
-  const fen = toFEN(chessData, turn);
   pikafishSend('stop');
   setTimeout(()=>{
-    pikafishSend('position fen ' + fen + ' moves ' + uciMoveList.join(' '));
+    pikafishSend('position startpos moves ' + uciMoveList.join(' '));
     pikafishSend('go movetime 1000');
   }, 200);
 }
