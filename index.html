@@ -327,7 +327,7 @@ button:active{transform:translateY(0)}
 }
 
 /* ===== 棋子滑行动画 ===== */
-.chess-piece{transition:left .28s cubic-bezier(.2,.7,.3,1), top .28s cubic-bezier(.2,.7,.3,1), box-shadow .15s ease}
+.chess-piece{transition:left .28s cubic-bezier(.2,.7,.3,1), top .28s cubic-bezier(.2,.7,.3,1), box-shadow .15s ease;z-index:10;will-change:left,top;transform:translate(-50%,-50%) translateZ(0)}
 
 /* ===== 落子特效层 ===== */
 #piecesLayer{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:3}
@@ -395,6 +395,7 @@ body.theme-metal .rec-title{color:#f0ddb0}
   <div class="logo-dot"></div>
   <h2>中国象棋</h2>
   <p class="sub">人机对战 · 请选择执子颜色</p>
+  <p id="engineStatus" style="font-size:12px;color:#e8a;margin-top:4px;">⏳ 引擎加载中...</p>
   <div class="btns">
     <button class="big red" onclick="startGame(0)">我执红（先手）</button>
     <button class="big black" onclick="startGame(1)">我执黑（后手）</button>
@@ -407,6 +408,10 @@ body.theme-metal .rec-title{color:#f0ddb0}
       <button class="tbtn" data-t="metal" onclick="setTheme('metal')">金属云纹</button>
       <button class="tbtn" data-t="cyber" onclick="setTheme('cyber')">赛博朋克</button>
     </div>
+  </div>
+  <div style="margin-top:18px;font-size:12px;">
+    <button id="clearCacheBtn" onclick="clearEngineCache()" style="padding:6px 16px;border-radius:8px;border:1px solid #888;background:transparent;cursor:pointer;font-size:12px;transition:all .3s;">清空引擎缓存</button>
+    <span id="cacheStatus" style="margin-left:10px;color:#888;"></span>
   </div>
 </div>
 
@@ -1677,6 +1682,7 @@ function computeBest(board, aiColorP, budget, isMobileP){
 // ===== 皮卡鱼(Pikafish) WASM 引擎桥接 =====
 let pikafishWorker = null;
 let pikafishReady = false;
+window.pikafishReady = false;
 let uciMoveList = [];
 let pikafishBestmoveCb = null;
 let pikafishLastEval = 0;
@@ -1695,8 +1701,16 @@ function fromUCI(uci) {
       const msg = e.data;
       if (msg.type === 'ready') {
         pikafishReady = true;
+window.pikafishReady = true;
+var es = document.getElementById('engineStatus');
+if(es){ es.innerText = '✅ 引擎已就绪，可以开始'; es.style.color = '#4a4'; }
       } else if (msg.type === 'stdout') {
         const line = msg.line;
+        if (line.trim() === 'readyok' && window._readyResolve) {
+          const r = window._readyResolve;
+          window._readyResolve = null;
+          r();
+        }
         if (line.startsWith('bestmove') && pikafishBestmoveCb) {
           const mv = line.split(' ')[1];
           const cb = pikafishBestmoveCb;
@@ -1716,9 +1730,9 @@ function fromUCI(uci) {
     };
     // 检测手机还是电脑
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
-    const ENG_THREADS = isMobile ? 4 : 8;
-    const ENG_HASH = isMobile ? 512 : 1024;
-    const ENG_MOVETIME = isMobile ? 10000 : 15000;
+    var ENG_THREADS = isMobile ? 4 : 8;
+    var ENG_HASH = isMobile ? 1024 : 3072;
+    var ENG_MOVETIME = isMobile ? 10000 : 15000;
     pikafishWorker.postMessage({ type: 'init', threads: ENG_THREADS, hash: ENG_HASH });
   } catch (e) {
     console.error('Failed to init Pikafish:', e);
@@ -1736,7 +1750,7 @@ function pikafishSearch() {
     const posCmd = 'position startpos' + (uciMoveList.length > 0 ? ' moves ' + uciMoveList.join(' ') : '');
     pikafishSend('stop');
     pikafishSend(posCmd);
-    pikafishSend('go movetime ' + ENG_MOVETIME);
+    pikafishSend('go movetime 15000');
   });
 }
 
@@ -1753,7 +1767,7 @@ async function searchBestMove(board) {
   }
   // 超时保护：25秒没响应就算失败
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('engine timeout')), 30000)
+    setTimeout(() => reject(new Error('engine timeout')), 35000)
   );
   try {
     const result = await Promise.race([pikafishSearch(), timeoutPromise]);
@@ -2263,12 +2277,54 @@ function loadGameState(){
 function clearSavedGame(){
   try{ localStorage.removeItem('xiangqi_save'); }catch(e){}
 }
-function startGame(color){
-  uciMoveList = [];
+async function clearEngineCache(){
+  const btn = document.getElementById('clearCacheBtn');
+  const st = document.getElementById('cacheStatus');
+  btn.disabled = true;
+  btn.innerText = '初始化中...';
+  btn.style.borderColor = '#e8a';
+  st.innerText = '⏳ 引擎加载中，请稍候...';
+  st.style.color = '#e8a';
+
+  // 等引擎加载完
+  for(let i=0;i<60;i++){
+    if(window.pikafishReady) break;
+    await new Promise(r=>setTimeout(r,500));
+  }
+  if(!window.pikafishReady){
+    btn.disabled = false;
+    btn.innerText = '清空引擎缓存';
+    st.innerText = '❌ 引擎加载超时，请刷新页面';
+    st.style.color = '#f44';
+    return;
+  }
+
+  btn.innerText = '清空中...';
+  st.innerText = '⏳ 正在清空缓存...';
+  window._readyResolve = function(){
+    btn.disabled = false;
+    btn.innerText = '清空引擎缓存';
+    btn.style.borderColor = '#4a4';
+    st.innerText = '✅ 已就绪，可以开始';
+    st.style.color = '#4a4';
+  };
   pikafishSend('ucinewgame');
   pikafishSend('isready');
+  setTimeout(()=>{
+    if(window._readyResolve){
+      window._readyResolve = null;
+      btn.disabled = false;
+      btn.innerText = '清空引擎缓存';
+      btn.style.borderColor = '#888';
+      st.innerText = '✅ 完成';
+      st.style.color = '#4a4';
+    }
+  }, 10000);
+}
+function startGame(color){
+  uciMoveList = [];
   clearSavedGame();
-
+  pikafishSend('ucinewgame');
   gameId++;
   playerColor = color;
   aiColor = color === 0 ? 1 : 0;
@@ -2368,8 +2424,20 @@ computeBoard();
       render();
       const msgDom = document.getElementById('msg').querySelector('span');
       if(turn === aiColor){
-        msgDom.innerText = "AI思考中...";
-        aiMove();
+        // 等引擎就绪再走
+        let waitCount = 0;
+        const tryAI = setInterval(()=>{
+          waitCount++;
+          if(window.pikafishReady){
+            clearInterval(tryAI);
+            aiMove();
+          } else if(waitCount > 30){
+            clearInterval(tryAI);
+            msgDom.innerText = "引擎加载失败，请刷新页面重试";
+          } else {
+            msgDom.innerText = "引擎加载中(" + waitCount + "/30)...";
+          }
+        }, 500);
       }else{
         msgDom.innerText = "轮到你走棋";
       }
